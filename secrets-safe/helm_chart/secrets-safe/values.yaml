@@ -1,0 +1,14 @@
+
+# Source of all images
+registryName: beyondtrust
+imageTag: 0.9.9
+
+# Ingress
+ingress:
+  enabled: true
+  host: any
+  certificateSecretName: ""
+
+# Replicas override - applies to all services
+#numberOfReplicas: 2
+

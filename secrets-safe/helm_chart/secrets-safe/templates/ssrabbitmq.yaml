@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+spec:
+  serviceName: rabbitmq
+  replicas: {{ template "rabbitmq.replicas" . }}
+  selector:
+      matchLabels:
+        app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      serviceAccountName: rabbitmq
+      terminationGracePeriodSeconds: 10
+      initContainers:
+        # K8s mounts ConfigMaps as read-only, but the official RabbitMQ Docker Image modifies config files in its entrypoint script.
+        # Use an initContainer to copy the ConfigMap files to a writeable location. 
+        # This workaround is modeled after the official rabbitmq-ha chart as per: https://github.com/helm/charts/pull/4169
+      - name: configmap-copy
+        image: busybox:1
+        command: ['/bin/sh', '-c', 'cp /etc/rabbitmq/files/* /etc/rabbitmq/']
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/rabbitmq/files
+        - name: config
+          mountPath: /etc/rabbitmq
+      - name: supply-user-in-definitions
+        image: busybox:1
+        command: ['/bin/sh', '-c', 'sed -i "s|REPLACE_WITH_USERNAME|${RABBITMQ_DEFAULT_USER}|g" /etc/rabbitmq/definitions.json']
+        volumeMounts:
+        - name: config
+          mountPath: /etc/rabbitmq
+        env:
+          - name: RABBITMQ_DEFAULT_USER
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmqcredentials-secret
+                key: rabbitmq-username
+      - name: supply-password-in-definitions
+        image: busybox:1
+        command: ['/bin/sh', '-c', 'sed -i "s|REPLACE_WITH_PASSWORD|${RABBITMQ_DEFAULT_PASS}|g" /etc/rabbitmq/definitions.json']
+        volumeMounts:
+        - name: config
+          mountPath: /etc/rabbitmq
+        env:
+          - name: RABBITMQ_DEFAULT_PASS
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmqcredentials-secret
+                key: rabbitmq-password
+      containers:        
+      - name: rabbitmq-k8s
+        image: rabbitmq:3.8.14-alpine
+        securityContext:
+            runAsUser: 1001
+            runAsGroup: 1001
+        args:
+        - rabbitmq-server
+        volumeMounts:
+          - name: config
+            mountPath: /etc/rabbitmq
+          - name: certs-storage-server
+            mountPath: /certs/rabbitmq
+          - name: certs-storage-client
+            mountPath: /certs/rabbitmqclient
+        ports:
+          - name: http
+            protocol: TCP
+            containerPort: 15672
+          - name: amqp
+            protocol: TCP
+            containerPort: 5671
+        livenessProbe:
+          exec:
+            command: ["rabbitmqctl", "status"]
+          initialDelaySeconds: 60
+          periodSeconds: 60
+          timeoutSeconds: 15
+        readinessProbe:
+          exec:
+            command: ["rabbitmqctl", "status"]
+          initialDelaySeconds: 20
+          periodSeconds: 60
+          timeoutSeconds: 10
+        imagePullPolicy: Always
+        env:
+          - name: MY_POD_NAME
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.name
+          - name: MY_POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+          - name: MY_POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: RABBITMQ_USE_LONGNAME
+            value: "true"
+          - name: RABBITMQ_NODENAME
+            value: "rabbit@$(MY_POD_NAME).rabbitmq.$(MY_POD_NAMESPACE).svc.cluster.local"
+          - name: K8S_HOSTNAME_SUFFIX
+            value: ".rabbitmq.$(MY_POD_NAMESPACE).svc.cluster.local"
+          - name: K8S_SERVICE_NAME
+            value: "rabbitmq"
+          - name: RABBITMQ_ERLANG_COOKIE
+            valueFrom:
+              secretKeyRef:
+                name: rabbitmqcredentials-secret
+                key: rabbitmq-erlang-cookie
+      volumes:
+        - name: certs-storage-server
+          secret:
+            secretName: rabbitmqcertsecret 
+        - name: certs-storage-client
+          secret:
+            secretName: rabbitmqclientcertsecret
+        - name: config
+          # This initially-empty directory is the writeable target for config files copied from the ConfigMap by an InitContainer.
+          emptyDir: {}
+        - name: config-volume
+          configMap:
+            name: rabbitmq-config
+            items:
+            - key: rabbitmq.conf
+              path: rabbitmq.conf
+            - key: definitions.json
+              path: definitions.json
+            - key: enabled_plugins
+              path: enabled_plugins

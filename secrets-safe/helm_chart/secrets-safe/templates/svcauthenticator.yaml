@@ -1,0 +1,14 @@
+# Local Authentication service
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: authenticator
+  labels:
+    run: authenticator
+spec:
+  ports:
+  - name: "11443"
+    port: 11443
+  selector:
+    run: authenticator

@@ -1,0 +1,6 @@
+{ 
+"name": "secret_safe", 
+"version": "1.0", 
+"author": "BeyondTrust", 
+"summary": "Allow creation and retrival of secrets in DevOps Secrets Safe.", 
+}

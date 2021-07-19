@@ -1,0 +1,83 @@
+# Standard Gateway deployment
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: standardgateway
+spec:
+  replicas: {{ template "standardgateway.replicas" . }}
+  selector:
+    matchLabels:
+      run: standardgateway
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        run: standardgateway
+    spec:
+      initContainers:
+      - name: wait-for-services
+        image: opsfleet/depends-on:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - "-service=rabbitmq"    
+      containers:
+      - name: standardgateway
+        image: {{ template "standardgateway.image" . }}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8443
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 30
+          timeoutSeconds: 20
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 300
+          timeoutSeconds: 20
+          periodSeconds: 60
+          failureThreshold: 30
+        volumeMounts:
+        - mountPath: /certs/standardgateway
+          name: certs-storage-server
+        - mountPath: /certs/rabbitmqclient
+          name: certs-storage-client
+        env:
+        - name: PBDO_SSL_CACERTFILE
+          value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        - name: PBDO_ServiceBus__Username
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmqcredentials-secret
+              key: rabbitmq-username
+        - name: PBDO_ServiceBus__Password
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmqcredentials-secret
+              key: rabbitmq-password
+        - name: PBDO_Server__EndPoints__Https__Certificate__Password
+          valueFrom:
+            secretKeyRef:
+              name: certificate-passwords
+              key: standardgateway
+        - name: PBDO_ServiceBus__CertPassphrase
+          valueFrom:
+            secretKeyRef:
+              name: certificate-passwords
+              key: rabbitmqclient
+      imagePullSecrets:
+      - name: btregistryaccess
+      volumes:
+      - name: certs-storage-server
+        secret:
+          secretName: standardgatewaycertsecret
+      - name: certs-storage-client
+        secret:
+          secretName: rabbitmqclientcertsecret

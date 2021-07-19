@@ -1,0 +1,105 @@
+# Local Authentication deployment
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authenticator
+spec:
+  replicas: {{ template "authenticator.replicas" . }}
+  selector:
+    matchLabels:
+      run: authenticator
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        run: authenticator
+    spec:
+      initContainers:
+      - name: wait-for-services
+        image: opsfleet/depends-on:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - "-service=rabbitmq"    
+      containers:
+      - name: authenticator
+        image: {{ template "authenticator.image" . }}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 11443
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 11443
+            scheme: HTTPS
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 4
+          failureThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /live
+            port: 11443
+            scheme: HTTPS
+          initialDelaySeconds: 300
+          timeoutSeconds: 20
+          periodSeconds: 60
+          failureThreshold: 30
+        volumeMounts:
+        - mountPath: /certs/authenticator
+          name: certs-storage-server
+        - mountPath: /certs/rabbitmqclient
+          name: certs-storage-client
+        env:
+        - name: PBDO_SSL_CACERTFILE
+          value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        - name: PBDO_ServiceBus__Username
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmqcredentials-secret
+              key: rabbitmq-username
+        - name: PBDO_ServiceBus__Password
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmqcredentials-secret
+              key: rabbitmq-password
+        - name: PBDO_DBService__Provider
+          valueFrom:
+            secretKeyRef:
+              name: secrets-safe-connection-strings
+              key: database-type
+        - name: PBDO_ConnectionStrings__OracleDB
+          valueFrom:
+            secretKeyRef:
+              name: secrets-safe-connection-strings
+              key: oracledb-connection-string
+        - name: PBDO_ConnectionStrings__postgres
+          valueFrom:
+            secretKeyRef:
+              name: secrets-safe-connection-strings
+              key: postgres-connection-string
+        - name: PBDO_ConnectionStrings__SqlServer
+          valueFrom:
+            secretKeyRef:
+              name: secrets-safe-connection-strings
+              key: sqlserver-connection-string
+        - name: PBDO_Server__EndPoints__Https__Certificate__Password
+          valueFrom:
+            secretKeyRef:
+              name: certificate-passwords
+              key: authenticator
+        - name: PBDO_ServiceBus__CertPassphrase
+          valueFrom:
+            secretKeyRef:
+              name: certificate-passwords
+              key: rabbitmqclient
+      imagePullSecrets:
+      - name: btregistryaccess
+      volumes:
+      - name: certs-storage-server
+        secret:
+          secretName: authenticatorcertsecret
+      - name: certs-storage-client
+        secret:
+          secretName: rabbitmqclientcertsecret

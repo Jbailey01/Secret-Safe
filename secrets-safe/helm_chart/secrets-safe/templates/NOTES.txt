@@ -1,0 +1,11 @@
+
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+The secrets-safe instance may be reached using the hostname: 
+{{ include "validCertificateHost" . | required "The host may not be set to 'any' when a certificate is supplied."  }}
+  
+  
+  
+  
